@@ -1,0 +1,115 @@
+generator client { provider = "prisma-client-js" }
+datasource db { provider = "postgresql"; url = env("DATABASE_URL") }
+
+enum ScheduleState { DRAFT SCHEDULED QUEUED PROCESSING PUBLISHING PUBLISHED FAILED NEEDS_VERIFICATION NEEDS_MANUAL PAUSED CANCELED }
+enum MediaKind { IMAGE VIDEO }
+enum PostFormat { REEL FEED_IMAGE CAROUSEL STORY }
+
+model User {
+  id String @id @default(cuid())
+  email String @unique
+  passwordHash String
+  timezone String @default("America/Sao_Paulo")
+  createdAt DateTime @default(now())
+  accounts SocialAccount[]
+  media MediaAsset[]
+  contents Content[]
+  notifications Notification[]
+}
+model SocialAccount {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  slot Int      // 1..5 ("Vincular conta N")
+  igUserId String
+  username String
+  avatarUrl String?
+  accountType String?
+  status String @default("CONNECTED") // CONNECTED | EXPIRED | REVOKED | INELIGIBLE
+  ineligibleReason String?
+  scopes String[]
+  tokenCipher String   // AES-256-GCM (nunca em claro)
+  tokenExpiresAt DateTime?
+  createdAt DateTime @default(now())
+  targets PublishTarget[]
+  metrics Metric[]
+  @@unique([userId, igUserId])
+  @@unique([userId, slot])
+}
+model MediaAsset {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind MediaKind
+  storageKey String
+  mime String
+  sizeBytes BigInt
+  width Int?
+  height Int?
+  durationSec Float?
+  createdAt DateTime @default(now())
+}
+model Content {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  format PostFormat
+  mediaIds String[]
+  caption String @default("")
+  firstComment String?
+  coverMediaId String?
+  theme String?
+  updatedAt DateTime @updatedAt
+  targets PublishTarget[]
+}
+model PublishTarget {
+  id String @id @default(cuid())
+  contentId String
+  content Content @relation(fields: [contentId], references: [id], onDelete: Cascade)
+  accountId String
+  account SocialAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  captionOverride String?
+  scheduledAtUtc DateTime?
+  timezone String @default("America/Sao_Paulo")
+  state ScheduleState @default(DRAFT)
+  lockedAt DateTime?
+  attemptCount Int @default(0)
+  nextRetryAtUtc DateTime?
+  containerId String?   // persistido ANTES de publicar: base da idempotência
+  externalId String?
+  permalink String?
+  lastError String?
+  attempts PublishAttempt[]
+  @@index([state, scheduledAtUtc])
+  @@index([accountId, scheduledAtUtc])
+  @@unique([contentId, accountId, scheduledAtUtc]) // bloqueia duplicata acidental
+}
+model PublishAttempt {
+  id String @id @default(cuid())
+  targetId String
+  target PublishTarget @relation(fields: [targetId], references: [id], onDelete: Cascade)
+  startedAt DateTime @default(now())
+  finishedAt DateTime?
+  step String
+  ok Boolean @default(false)
+  errorCode String?
+  errorMessage String?
+}
+model Metric {
+  id String @id @default(cuid())
+  accountId String
+  account SocialAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  externalId String?
+  name String
+  value Float
+  collectedAt DateTime @default(now())
+}
+model Notification {
+  id String @id @default(cuid())
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind String
+  message String
+  readAt DateTime?
+  createdAt DateTime @default(now())
+}
